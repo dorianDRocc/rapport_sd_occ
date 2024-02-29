@@ -1,0 +1,120 @@
+---
+title: "Synthèse pêches électriques réseaux `r params$mon_annee`"
+subtitle: "Prétraitements géographiques échelle régionale"
+author: "OFB - DR Bretagne"
+date: "`r format(Sys.time(), 'Le %d %B %Y')`"
+output:
+  bookdown::word_document2
+always_allow_html: true
+params:
+  # mes_depts: !r c("22", "29", "35", "56")
+  mes_depts: !r c("44", "49", "53", "72", "85")
+  mon_annee: "2022"
+  mon_crs: 4326
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+
+
+```{r}
+# chargement des packages et des données
+library(COGiter)
+library(tidyverse)
+library(sf)
+library(maptiles)
+load(file = "../processed_data/reg_data.RData")
+```
+
+>Départements concernés : `r params$mes_depts %>% sort() %>% paste(collapse = ", ")`.
+
+
+```{r}
+# départements de la région
+departements_metro_geo <- departements_metro_geo %>% 
+  sf::st_transform(crs = params$mon_crs)
+
+mes_depts_geo <- departements_metro_geo %>% 
+  filter(DEP %in% params$mes_depts)
+  
+# départements adjacents
+depts_adjacents <- st_touches(mes_depts_geo, departements_metro_geo) %>% 
+  unlist() %>% 
+  unique()
+
+# total
+mes_depts_geo_plus_adj <- departements_metro_geo %>% 
+  slice(depts_adjacents)
+```
+
+```{r}
+# Bassins hydro
+# France entière
+reg_hydro_units <- tod::wfs_sandre(url_wfs = "https://services.sandre.eaufrance.fr/geo/sandre",
+                                   couche = "SousSecteurHydro_FXX") %>% 
+  sf::st_transform(crs = params$mon_crs)
+
+# région
+reg_hydro_units <- reg_hydro_units %>% 
+  sf::st_join(mes_depts_geo) %>% 
+  filter(!is.na(DEP))
+```
+
+
+
+
+```{r}
+# les points IPR
+mes_reg_pop_geo <- mes_reg_pop %>% 
+  sf::st_as_sf(coords = c("pop_coordonnees_x", "pop_coordonnees_y"),
+               crs = 2154) %>% 
+  sf::st_transform(crs = params$mon_crs)
+
+reg_opr_ipr_annee <- reg_ope_ipr %>%
+  group_by(pop_id) %>% 
+  filter(annee == max(annee)) # la dernière année de données
+
+reg_pops_ipr_annee_geo <- mes_reg_pop_geo %>% 
+  left_join(reg_opr_ipr_annee) %>% 
+  filter(!is.na(ipr)) %>% 
+  mutate(cli_libelle = fct_relevel(cli_libelle,
+                                   c("Très bon", "Bon", "Moyen", "Médiocre", "Mauvais")))
+```
+
+
+```{r}
+# fond de carte bretagne pdl à partir d'OpenStreetMap
+bpdl_osm <- maptiles::get_tiles(x = reg_hydro_units,
+                                provider = "OpenStreetMap",
+                                crop = TRUE,
+                                zoom = 11)
+```
+
+```{r}
+list.files("../raw_data")
+me_drains_ppx <- st_read("../raw_data/ME_CE_drains_prcpx_03_2014_DIR2_L93.shp")
+me_plansdo <- st_read("../raw_data/ME_PLAN_DEAU_03_2014_DIR2_L93.shp")
+me_transition <- st_read("../raw_data/ME_TRANSITION_03_2014_DIR2_L93.shp")
+```
+
+
+```{r}
+####### sauvegarde
+# Rdata
+save(mes_depts_geo_plus_adj,
+     reg_pops_ipr_annee_geo,
+     reg_hydro_units,
+     me_drains_ppx,
+     me_plansdo,
+     me_transition,
+     file = "../processed_data/reg_geo_data.RData")
+
+# fond de carte (ne peut pas être sauvé en RData)
+terra::writeRaster(x = bpdl_osm,
+                   filename = "../processed_data/bpdl_osm.tif",
+                   overwrite = TRUE)
+```
+
+

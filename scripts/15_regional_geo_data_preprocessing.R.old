@@ -1,0 +1,65 @@
+# chargement des packages et des données
+library(COGiter)
+library(tidyverse)
+library(sf)
+library(maptiles)
+load(file = "processed_data/reg_data.RData")
+
+# mon_dept <- "22"
+mon_crs <- 4326 # choix du WGS84
+# mon_annee <- 2022
+
+# --------------------------------------
+######### les départements
+mes_depts_geo <- departements_metro_geo %>% 
+  filter(DEP %in% c('22', '29', '35', '44', '49', '53', '56', '72', '85')) %>% 
+  sf::st_transform(crs = mon_crs)
+
+# --------------------------------------
+######### bassins hydrographiques
+# France entière
+reg_hydro_units <- tod::wfs_sandre(url_wfs = "https://services.sandre.eaufrance.fr/geo/sandre",
+                                   couche = "SousSecteurHydro_FXX") %>% 
+  sf::st_transform(crs = mon_crs)
+
+# région
+reg_hydro_units <- reg_hydro_units %>% 
+  sf::st_join(mes_depts_geo) %>% 
+  filter(!is.na(DEP))
+
+# -----------------------
+# les points IPR
+mes_reg_pop_geo <- mes_reg_pop %>% 
+  sf::st_as_sf(coords = c("pop_coordonnees_x", "pop_coordonnees_y"),
+               crs = 2154) %>% 
+  sf::st_transform(crs = mon_crs)
+
+reg_opr_ipr_annee <- reg_ope_ipr %>%
+  group_by(pop_id) %>% 
+  filter(annee == max(annee)) # la dernière année de données
+
+reg_pops_ipr_annee_geo <- mes_reg_pop_geo %>% 
+  left_join(reg_opr_ipr_annee) %>% 
+  filter(!is.na(ipr)) %>% 
+  mutate(cli_libelle = fct_relevel(cli_libelle,
+                                   c("Très bon", "Bon", "Moyen", "Médiocre", "Mauvais")))
+
+# fond de carte bretagne pdl à partir d'OpenStreetMap
+bpdl_osm <- maptiles::get_tiles(x = reg_hydro_units,
+                                provider = "OpenStreetMap",
+                                crop = TRUE,
+                                zoom = 11)
+
+# --------------------------
+####### sauvagarde
+# Rdata
+save(mes_depts_geo,
+     #bpdl_osm,
+     reg_pops_ipr_annee_geo,
+     reg_hydro_units,
+     file = "processed_data/reg_geo_data.RData")
+
+# fond de carte (ne peut pas être sauvé en RData)
+terra::writeRaster(x = bpdl_osm,
+                   filename = "processed_data/bpdl_osm.tif",
+                   overwrite=TRUE)

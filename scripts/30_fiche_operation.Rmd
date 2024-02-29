@@ -1,0 +1,280 @@
+---
+geometry: margin=2cm
+header-includes:
+  - \usepackage[font={it}, labelfont={bf}]{caption}
+output:
+  bookdown::pdf_document2:
+    fig_caption: yes
+ #   fig_numbering: no
+    extra_dependencies: ["float"]
+    toc: no
+    includes:
+      in_header: FigNonNumerotees.tex
+always_allow_html: true
+params:
+  mon_ope: "88677"
+  #mon_ope: "87653"
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE,
+                      fig.pos = "H",
+                      out.extra = "",
+                      eval.after = "fig.cap")
+```
+
+
+
+
+```{r}
+# devtools::install_github("pascalirz/aspe")
+# devtools::install_github("pascalirz/ggplotExtra")
+library(aspe)
+library(ggplotExtra)
+library(tidyverse)
+
+load(file = "../processed_data/reg_data.RData")
+source(file = "../R/01_fonctions.R")
+```
+
+```{r}
+prov <- reg_ope %>% 
+  filter(ope_id == params$mon_ope)
+
+mon_libelle <- prov %>% 
+  pull(pop_libelle)
+
+mon_pop <- prov %>% 
+  pull(pop_id)
+
+mon_annee <- prov %>% 
+  pull(annee) %>% 
+  max()
+
+mon_operateur_terrain <- prov %>% 
+  pull(operateur_peche)
+
+vars_peche <- c("Conductivité", "Intensité", "Tension", "Puissance", "Temps de pêche")
+```
+
+Opérateur de terrain en `r mon_annee` : `r mon_operateur_terrain`.
+
+# Conditions environnementales
+
+```{r fig1, fig.width = 9, dpi = 300, fig.height = 4, fig.cap = "Variabilité interannuelle des caractéristiques environnementales de la station."}
+reg_ope_env %>% 
+  filter(pop_id == mon_pop,
+         !(variable %in% vars_peche)
+         ) %>% 
+  ggplotExtra::gg_lattice_line(
+  var_x = annee,
+  var_y = valeur,
+  var_lattice = variable,
+  threshold_x = 2007,
+  lab_y = "",
+  free_y = TRUE
+)
+```
+
+# Paramètres de pêche
+
+
+```{r fig2, fig.width = 9, dpi = 300, fig.height = 4, fig.cap = "Variabilité interannuelle des paramètres de pêche."}
+
+reg_ope_env %>% 
+  filter(
+    pop_id == mon_pop,
+    (variable %in% vars_peche)) %>% 
+  mutate(variable = fct_relevel(variable, "Intensité", "Puissance", "Tension")) %>% 
+  ggplotExtra::gg_lattice_line(
+  var_x = annee,
+  var_y = valeur,
+  var_lattice = variable,
+  threshold_x = 2007,
+  lab_y = "",
+  free_y = TRUE
+)
+```
+
+# IPR
+
+```{r fig3, fig.height = 3, fig.cap="Variation interannuelle de l'IPR sur la station."}
+classe_ipr <- classe_ipr %>%
+  aspe::ip_completer_classes_couleur()
+
+
+pop_ipr <- reg_ope_ipr %>%
+  filter(pop_id == mon_pop)
+
+aspe::gg_temp_ipr(df_ipr = pop_ipr,
+                  var_id_sta = pop_libelle,
+                  var_ipr = ipr,
+                  df_classes = classe_ipr) +
+  ggplot2::labs(title = "") +
+    ggplot2::theme(
+    panel.grid.major.x = ggplot2::element_line(size = .2,
+                                      color = "grey80"),
+    panel.grid.major.y = ggplot2::element_blank(),
+    legend.position = "right"
+  ) +
+  ggplot2::guides(fill = ggplot2::guide_legend(title = "Classe de qualité",
+                             nrow = 5,
+                             byrow = TRUE))
+```
+
+```{r fig4, fig.width = 8, fig.height = 5.5, fig.cap="Variation interannuelle des métriques IPR sur la station. L'indice agrégé étant la somme de 7 métriques, les seuils de qualité IPR sont ici divisés par 7 pour chacune des métriques."}
+reg_ope_metrique %>%
+  filter(pop_id == mon_pop) %>%
+  mutate(
+    metrique = str_replace(
+      string = metrique,
+      pattern = "opi_",
+      replacement = ""
+    ),
+    metrique = str_to_upper(metrique)
+  ) %>%
+  ggplotExtra::gg_lattice_ipr(
+    var_y = valeur,
+    var_lattice = metrique,
+    metriques = TRUE,
+    interactif = FALSE,
+    df_classes = classe_ipr
+  ) +
+  ggplot2::theme(
+    legend.position = "none",
+    panel.grid.major.x = ggplot2::element_line(size = .2, color = "grey80"),
+    panel.grid.major.y = ggplot2::element_blank()
+  ) +
+  ggplot2::ggtitle("Métriques constitutives de l'IPR")
+```
+
+# Les espèces
+
+## Dynamique du peuplement
+
+```{r}
+data <- reg_ope_capt %>%
+  filter(pop_id == mon_pop,
+         effectif > 0)
+
+richesse <- data %>% 
+  summarise(n = n_distinct(esp_code_alternatif)) %>% 
+  pull(n)
+
+hauteur_fig <- richesse %>% `/`(5) %>% ceiling() %>% `*`(1.3)%>% `+`(1) %>% min(11.5)
+```
+
+
+```{r fig5, fig.height = hauteur_fig, fig.width = 10, fig.cap = "Variabilité interannuelle des densités par espèce, en nombre d'individus pour 1000 m². NB L'échelle des ordonnées varie d'espèce en espèce."}
+mes_especes <- data %>% 
+  group_by(esp_nom_commun) %>% 
+  summarise(n = n_distinct(annee)) %>% 
+  filter(n > 1) %>% 
+  pull(esp_nom_commun)
+
+data %>% 
+  filter(esp_nom_commun %in% mes_especes) %>% 
+  gg_temp_abondance_groupe(var_espece = esp_nom_commun,
+                  var_abondance = effectif,
+                  nb_colonnes = 5)
+```
+
+```{r fig6, fig.height = 1 + hauteur_fig * 0.6, fig.cap = "Dynamique interannuelle du peuplement. La superficie de chaque point est proportionnelle à l'effectif capturé. Le protocole d'échantillonnage employé est indiqué sous le graphique des abondances. Les taxons qui contribuent au calcul de l'IPR sont indiquées en caractères gras."}
+test <- reg_ope_capt %>% 
+  filter(pop_id == mon_pop,
+         effectif > 0) %>% 
+  rename(lop_effectif = effectif) %>% 
+  aspe::mef_colo_ext_pops()
+
+protocoles <- test %>% 
+  select(annee,
+         pro_libelle) %>% 
+  filter(!is.na(pro_libelle)) %>% 
+  distinct()
+
+test <- test %>% 
+  select(-pro_libelle) %>% 
+  left_join(protocoles)
+
+prov <- test %>% 
+  left_join(y = ref_espece %>% 
+              select(esp_code_alternatif,
+                     esp_nom_commun))
+
+aspe::gg_temp_peuplement(prov,
+                         var_especes = esp_nom_commun,
+                         taxons_ipr = "bold")
+```
+
+
+## Le peuplement en `r mon_annee`
+
+```{r}
+data <- reg_ope_capt %>%
+  filter(ope_id == params$mon_ope,
+         effectif > 0)
+
+richesse <- n_distinct(data$esp_code_alternatif)
+```
+
+
+```{r fig7, fig.height = 1 + richesse / 5, fig.cap = "Effectif capturé par espèce."}
+data %>% 
+  ggplot(aes(x = fct_reorder(esp_nom_commun, effectif),
+             y = effectif)) +
+  geom_bar(stat = "identity",
+           fill = "darkgreen") +
+  coord_flip() +
+  labs(x = "",
+       y = "Effectif capturé") +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank())
+```
+
+
+```{r}
+mon_point <- reg_ope_pp %>%
+  filter(ope_id == params$mon_ope) %>%
+  pull(pop_id) %>%
+  unique()
+   
+
+test <- reg_ope_pp %>%
+  filter(ope_id == params$mon_ope) %>%
+  mutate(esp_nom_commun = fct_reorder(esp_nom_commun, ppi_valeur_probabilite),
+         couleur = ifelse(presence == "Présence",
+                          "#1B9E77",
+                          "#D95F02")) %>%
+  arrange(esp_nom_commun)
+
+ma_station <- test %>%
+  pull(pop_libelle) %>%
+  unique()
+```
+
+```{r fig8, fig.height = 4.5, dpi = 300, fig.cap=paste0("Présence / absence des espèces en ", mon_annee, ", en regard de leur probabilité de présence modélisée sur des sites de référence (d'après Oberdorff et al. 2001). Si la station est en bon état, les espèces avec les plus fortes probabilités de présence (en haut du graphique) sont observées in situ, donc leur barre est de couleur verte, tandis celles en bas du graphique sont attendues absentes, donc de couleur marron.")}
+ggplot(data = test,
+       aes(x = esp_nom_commun,
+           y = ppi_valeur_probabilite,
+           fill = presence)) +
+  geom_bar(stat = "identity",
+           col = "white") +
+  coord_flip() +
+  labs(x = "",
+       y = "Probabilité de présence",
+       title = ma_station,
+       fill = "") +
+  scale_y_continuous(labels = scales::percent) +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text = element_text(size = 8),
+        axis.text.y = element_text(colour = test$couleur),
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 9)) +
+  scale_fill_brewer(palette = "Dark2", direction = -1)
+```
+
+
+
